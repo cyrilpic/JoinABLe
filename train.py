@@ -20,7 +20,7 @@ import torchmetrics
 import pytorch_lightning as pl
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
-from pytorch_lightning.plugins import DDPPlugin
+from pytorch_lightning.strategies import DDPStrategy
 
 from utils import metrics
 from utils import util
@@ -42,21 +42,19 @@ class JointPrediction(pl.LightningModule):
             post_net=args.post_net,
             pre_net=args.pre_net
         )
+        # Compile model for H100 optimization (PyTorch 2.x)
+        if hasattr(torch, 'compile'):
+            self.model = torch.compile(self.model)
         self.save_hyperparameters()
         self.args = args
-        self.test_iou = torchmetrics.IoU(
+        self.test_iou = torchmetrics.classification.BinaryJaccardIndex(
             threshold=args.threshold,
-            num_classes=2,
-            compute_on_step=False,
             ignore_index=0,
         )
-        self.test_accuracy = torchmetrics.Accuracy(
+        self.test_accuracy = torchmetrics.classification.BinaryAccuracy(
             threshold=args.threshold,
-            num_classes=2,
-            compute_on_step=False,
-            # ignore_index=0,
-            multiclass=True
         )
+        self.test_step_outputs = []
 
     def training_step(self, batch, batch_idx):
         g1, g2, jg = batch
@@ -105,23 +103,25 @@ class JointPrediction(pl.LightningModule):
         else:
             self.log(f"eval_{split}_top_1_no_holes", top_1, on_step=False, on_epoch=True, logger=True)
             top_1_no_holes = top_1
-        return {
+        output = {
             "loss": loss,
             "top_k": top_k,
             "top_1_holes": top_1_holes,
             "top_1_no_holes": top_1_no_holes
         }
+        self.test_step_outputs.append(output)
+        return output
 
-    def test_epoch_end(self, outs):
+    def on_test_epoch_end(self):
         # Get the split we are using from the dataset
         split = self.test_dataloader.dataloader.dataset.split
         test_iou = self.test_iou.compute()
         test_accuracy = self.test_accuracy.compute()
         self.log(f"eval_{split}_iou", test_iou)
         self.log(f"eval_{split}_accuracy", test_accuracy)
-        all_top_k = np.stack([x["top_k"] for x in outs])
-        all_top_1_holes = np.array([x["top_1_holes"] for x in outs if x["top_1_holes"] is not None])
-        all_top_1_no_holes = np.array([x["top_1_no_holes"] for x in outs if x["top_1_no_holes"] is not None])
+        all_top_k = np.stack([x["top_k"] for x in self.test_step_outputs])
+        all_top_1_holes = np.array([x["top_1_holes"] for x in self.test_step_outputs if x["top_1_holes"] is not None])
+        all_top_1_no_holes = np.array([x["top_1_no_holes"] for x in self.test_step_outputs if x["top_1_no_holes"] is not None])
         # All samples should be either holes or no holes, so check the counts add up to the total
         assert len(all_top_1_holes) + len(all_top_1_no_holes) == all_top_k.shape[0]
         if len(all_top_1_holes) > 0:
@@ -147,6 +147,8 @@ class JointPrediction(pl.LightningModule):
                     y=top_k.tolist(),
                     overwrite=True
                 )
+        # Clear the outputs for next epoch
+        self.test_step_outputs.clear()
         return {
             "iou": test_iou,
             "accuracy": test_accuracy,
@@ -196,37 +198,39 @@ def get_trainer(args, loggers, callbacks=None, resume_checkpoint=None, mode="tra
         # Distributed training
         if torch.cuda.device_count() > 1 and args.accelerator != "None":
             if args.accelerator == "ddp":
-                plugins = DDPPlugin(find_unused_parameters=False)
+                strategy = DDPStrategy(find_unused_parameters=False)
             else:
-                plugins = None
+                strategy = "auto"
             trainer = Trainer(
                 callbacks=callbacks,
-                gpus=args.gpus,
-                accelerator=args.accelerator,
+                devices=args.gpus,
+                accelerator="gpu",
+                strategy=strategy,
                 logger=loggers,
                 max_epochs=args.epochs,
                 sync_batchnorm=args.batch_norm,
-                plugins=plugins,
+                precision="bf16-mixed",
                 log_every_n_steps=log_every_n_steps,
                 flush_logs_every_n_steps=flush_logs_every_n_steps,
-                resume_from_checkpoint=resume_checkpoint
             )
         # Single GPU training
         else:
             trainer = Trainer(
                 callbacks=callbacks,
-                gpus=args.gpus,
+                devices=args.gpus,
+                accelerator="gpu",
                 logger=loggers,
                 max_epochs=args.epochs,
+                precision="bf16-mixed",
                 log_every_n_steps=log_every_n_steps,
                 flush_logs_every_n_steps=flush_logs_every_n_steps,
-                resume_from_checkpoint=resume_checkpoint
             )
         if resume_checkpoint is not None and trainer.global_rank == 0:
             print("Resuming existing checkpoint from:", resume_checkpoint)
     elif mode == "evaluation":
         trainer = Trainer(
-            gpus=None,
+            devices=1,
+            accelerator="cpu",
             logger=loggers,
             log_every_n_steps=log_every_n_steps,
             flush_logs_every_n_steps=flush_logs_every_n_steps,
@@ -236,7 +240,7 @@ def get_trainer(args, loggers, callbacks=None, resume_checkpoint=None, mode="tra
 
 def train_once(args, exp_name_dir, loggers, train_dataset, val_dataset, resume_checkpoint=None):
     """Train once for multiple run training"""
-    pl.utilities.seed.seed_everything(args.seed)
+    pl.seed_everything(args.seed)
     model = JointPrediction(args)
     # Save in the main experiment directory
     checkpoint_callback = ModelCheckpoint(
@@ -263,7 +267,7 @@ def train_once(args, exp_name_dir, loggers, train_dataset, val_dataset, resume_c
         num_workers=args.num_workers
     )
     val_loader = val_dataset.get_test_dataloader(batch_size=1, num_workers=args.num_workers)
-    trainer.fit(model, train_loader, val_loader)
+    trainer.fit(model, train_loader, val_loader, ckpt_path=resume_checkpoint)
     if trainer.global_rank == 0:
         print("--------------------------------------------------------------------------------")
         print("TRAINING RESULTS")
@@ -275,7 +279,7 @@ def train_once(args, exp_name_dir, loggers, train_dataset, val_dataset, resume_c
 
 def evaluate_once(args, exp_name_dir, loggers, split):
     """Evaluate once after a multiple run training"""
-    pl.utilities.seed.seed_everything(args.seed)
+    pl.seed_everything(args.seed)
     # Load the model again as if sync_batchnorm is on it gets modified
     checkpoint_file = exp_name_dir / f"{args.checkpoint}.ckpt"
     model = JointPrediction.load_from_checkpoint(
