@@ -513,7 +513,7 @@ class JointGraphDataset(JointBaseDataset):
         # span = bbox_max - bbox_min
         # max_span = torch.max(span)
         # scale = 2.0 / max_span
-        bboxes = torch.cat((bbox1, bbox2))
+        bboxes = torch.cat((bbox1, bbox2), dim=0)
         scale = (1.0 / bboxes.abs().max()) * 0.999999
         return scale
 
@@ -665,7 +665,7 @@ class JointGraphDataset(JointBaseDataset):
             self.delete_features(node)
 
         # Load the networkx graph file
-        nxg = json_graph.node_link_graph(g_json)
+        nxg = json_graph.node_link_graph(g_json, edges='links')
         # Convert to a graph
         g = from_networkx(nxg)
         g = self.reshape_graph_features(g)
@@ -712,11 +712,11 @@ class JointGraphDataset(JointBaseDataset):
 
     def reshape_graph_features(self, g):
         """Reshape the multi-dimensional graph features from a list to tensors"""
-        g.x = torch.cat(g.x).reshape(
+        g.x = torch.cat(g.x, dim=0).reshape(
             (-1, self.grid_size, self.grid_size, self.grid_channels))
-        g.entity_types = torch.cat(g.entity_types).reshape(
+        g.entity_types = torch.cat(g.entity_types, dim=0).reshape(
             (-1, len(self.entity_type_map)))
-        g.convexity = torch.cat(g.convexity).reshape(
+        g.convexity = torch.cat(g.convexity, dim=0).reshape(
             (-1, len(self.convexity_type_map)))
         return g
 
