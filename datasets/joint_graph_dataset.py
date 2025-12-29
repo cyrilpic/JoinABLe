@@ -346,7 +346,7 @@ class JointGraphDataset(JointBaseDataset):
         # 'Remove' here is setting the features to None
         # as we can't delete the class properties
         edge_index = g.edge_index
-        for g_key in g.keys:
+        for g_key in g.keys():
             if g_key == "edge_index" or g_key == "is_face":
                 continue
             if g_key == "x":
