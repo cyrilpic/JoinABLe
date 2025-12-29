@@ -712,11 +712,11 @@ class JointGraphDataset(JointBaseDataset):
 
     def reshape_graph_features(self, g):
         """Reshape the multi-dimensional graph features from a list to tensors"""
-        g.x = torch.cat(g.x, dim=0).reshape(
+        g.x = torch.cat(list(g.x), dim=0).reshape(
             (-1, self.grid_size, self.grid_size, self.grid_channels))
-        g.entity_types = torch.cat(g.entity_types, dim=0).reshape(
+        g.entity_types = torch.cat(list(g.entity_types), dim=0).reshape(
             (-1, len(self.entity_type_map)))
-        g.convexity = torch.cat(g.convexity, dim=0).reshape(
+        g.convexity = torch.cat(list(g.convexity), dim=0).reshape(
             (-1, len(self.convexity_type_map)))
         return g
 
