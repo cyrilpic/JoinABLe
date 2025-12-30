@@ -356,26 +356,29 @@ class PreJointNetEdge(nn.Module):
         device = g.edge_index.device
         # We have both grid and entity features
         if self.ent_feat_size > 0 and self.grid_feat_size > 0:
-            x = torch.zeros(g.num_nodes, self.grid_dim + self.ent_dim, dtype=torch.float, device=device)
             ent = self.get_entity_features(g)
             grid = self.get_grid_features(g)
             ent_edges = ent[edge_node_indices, :]
             grid_edges = grid[edge_node_indices, :]
             x_ent = self.model_pre_ent(ent_edges)
             x_grid = self.model_pre_grid(grid_edges)
-            x[edge_node_indices, :] = torch.cat((x_grid, x_ent), dim=1)
+            x_concat = torch.cat((x_grid, x_ent), dim=1)
+            x = torch.zeros(g.num_nodes, self.grid_dim + self.ent_dim, dtype=x_concat.dtype, device=device)
+            x[edge_node_indices, :] = x_concat
         # We have no grid features, so just use the entity features
         elif self.ent_feat_size > 0:
             ent = self.get_entity_features(g)
             ent_edges = ent[edge_node_indices, :]
-            x = torch.zeros(g.num_nodes, self.ent_dim, dtype=torch.float, device=device)
-            x[edge_node_indices, :] = self.model_pre_ent(ent_edges)
+            x_ent = self.model_pre_ent(ent_edges)
+            x = torch.zeros(g.num_nodes, self.ent_dim, dtype=x_ent.dtype, device=device)
+            x[edge_node_indices, :] = x_ent
         # We have no entity features, so just use the grid
         elif self.grid_feat_size > 0:
             grid = self.get_grid_features(g)
             grid_edges = grid[edge_node_indices, :]
-            x = torch.zeros(g.num_nodes, self.grid_dim, dtype=torch.float, device=device)
-            x[edge_node_indices, :] = self.model_pre_grid(grid_edges)
+            x_grid = self.model_pre_grid(grid_edges)
+            x = torch.zeros(g.num_nodes, self.grid_dim, dtype=x_grid.dtype, device=device)
+            x[edge_node_indices, :] = x_grid
         return x
 
     def forward(self, g1, g2):
