@@ -193,7 +193,6 @@ def load_dataset(args, split="train", random_rotate=False, label_scheme="Joint",
 def get_trainer(args, loggers, callbacks=None, resume_checkpoint=None, mode="train"):
     """Get the PyTorch Lightning Trainer"""
     log_every_n_steps = 100
-    flush_logs_every_n_steps = 150
     if mode == "train":
         # Distributed training
         if torch.cuda.device_count() > 1 and args.accelerator != "None":
@@ -211,7 +210,6 @@ def get_trainer(args, loggers, callbacks=None, resume_checkpoint=None, mode="tra
                 sync_batchnorm=args.batch_norm,
                 precision="bf16-mixed",
                 log_every_n_steps=log_every_n_steps,
-                flush_logs_every_n_steps=flush_logs_every_n_steps,
             )
         # Single GPU training
         else:
@@ -223,7 +221,6 @@ def get_trainer(args, loggers, callbacks=None, resume_checkpoint=None, mode="tra
                 max_epochs=args.epochs,
                 precision="bf16-mixed",
                 log_every_n_steps=log_every_n_steps,
-                flush_logs_every_n_steps=flush_logs_every_n_steps,
             )
         if resume_checkpoint is not None and trainer.global_rank == 0:
             print("Resuming existing checkpoint from:", resume_checkpoint)
@@ -233,7 +230,6 @@ def get_trainer(args, loggers, callbacks=None, resume_checkpoint=None, mode="tra
             accelerator="cpu",
             logger=loggers,
             log_every_n_steps=log_every_n_steps,
-            flush_logs_every_n_steps=flush_logs_every_n_steps,
         )
     return trainer
 
