@@ -61,8 +61,55 @@ class JointPrediction(pl.LightningModule):
         try:
             g1, g2, jg = batch
             jg.edge_attr = jg.edge_attr.long()
+
+            # Check for data integrity issues
+            if batch_idx >= 5:  # Start checking before batch 6
+                print(f"\nBatch {batch_idx} diagnostics:")
+                print(f"  g1: nodes={g1.num_nodes}, edges={g1.num_edges}")
+                print(f"  g2: nodes={g2.num_nodes}, edges={g2.num_edges}")
+                print(f"  jg: nodes={jg.num_nodes}, edges={jg.num_edges}")
+
+                # Check for invalid edge indices
+                if g1.edge_index.max() >= g1.num_nodes:
+                    print(f"  WARNING: g1 has invalid edge index! max={g1.edge_index.max()}, num_nodes={g1.num_nodes}")
+                if g2.edge_index.max() >= g2.num_nodes:
+                    print(f"  WARNING: g2 has invalid edge index! max={g2.edge_index.max()}, num_nodes={g2.num_nodes}")
+                if jg.edge_index.max() >= jg.num_nodes:
+                    print(f"  WARNING: jg has invalid edge index! max={jg.edge_index.max()}, num_nodes={jg.num_nodes}")
+
+                # Check for NaN/Inf in input features
+                if hasattr(g1, 'x') and g1.x is not None:
+                    if torch.isnan(g1.x).any():
+                        print(f"  WARNING: g1.x contains NaN!")
+                    if torch.isinf(g1.x).any():
+                        print(f"  WARNING: g1.x contains Inf!")
+                if hasattr(g2, 'x') and g2.x is not None:
+                    if torch.isnan(g2.x).any():
+                        print(f"  WARNING: g2.x contains NaN!")
+                    if torch.isinf(g2.x).any():
+                        print(f"  WARNING: g2.x contains Inf!")
+
             x = self.model(g1, g2, jg)
+
+            # Check model output
+            if batch_idx >= 5:
+                if torch.isnan(x).any():
+                    print(f"  WARNING: Model output contains NaN!")
+                if torch.isinf(x).any():
+                    print(f"  WARNING: Model output contains Inf!")
+
             loss = self.model.compute_loss(self.args, x, jg)
+
+            # Check loss
+            if batch_idx >= 5:
+                print(f"  Loss: {loss.item():.6f}")
+                if torch.isnan(loss):
+                    print(f"  ERROR: Loss is NaN!")
+                    raise ValueError("Loss is NaN")
+                if torch.isinf(loss):
+                    print(f"  ERROR: Loss is Inf!")
+                    raise ValueError("Loss is Inf")
+
             # Log the run at every epoch, although this gets reduced via mean to a float
             self.log("train_loss", loss, on_step=False, on_epoch=True, prog_bar=False, logger=True)
             return loss
@@ -72,13 +119,6 @@ class JointPrediction(pl.LightningModule):
             print(f"g1: num_nodes={g1.num_nodes}, num_edges={g1.num_edges}")
             print(f"g2: num_nodes={g2.num_nodes}, num_edges={g2.num_edges}")
             print(f"jg: num_nodes={jg.num_nodes}, num_edges={jg.num_edges}")
-            print(f"g1.edge_index shape: {g1.edge_index.shape}, min: {g1.edge_index.min()}, max: {g1.edge_index.max()}")
-            print(f"g2.edge_index shape: {g2.edge_index.shape}, min: {g2.edge_index.min()}, max: {g2.edge_index.max()}")
-            print(f"jg.edge_index shape: {jg.edge_index.shape}, min: {jg.edge_index.min()}, max: {jg.edge_index.max()}")
-            if hasattr(g1, 'x') and g1.x is not None:
-                print(f"g1.x shape: {g1.x.shape}, dtype: {g1.x.dtype}")
-            if hasattr(g2, 'x') and g2.x is not None:
-                print(f"g2.x shape: {g2.x.shape}, dtype: {g2.x.dtype}")
             print(f"Error type: {type(e).__name__}")
             print(f"Error message: {e}")
             print(f"{'='*80}\n")
@@ -256,6 +296,8 @@ def get_trainer(args, loggers, callbacks=None, resume_checkpoint=None, mode="tra
 def train_once(args, exp_name_dir, loggers, train_dataset, val_dataset, resume_checkpoint=None):
     """Train once for multiple run training"""
     pl.seed_everything(args.seed)
+    # Enable anomaly detection to catch NaN/Inf in backward pass
+    torch.autograd.set_detect_anomaly(True)
     model = JointPrediction(args)
     # Save in the main experiment directory
     checkpoint_callback = ModelCheckpoint(
