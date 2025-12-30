@@ -58,13 +58,31 @@ class JointPrediction(pl.LightningModule):
         self.test_step_outputs = []
 
     def training_step(self, batch, batch_idx):
-        g1, g2, jg = batch
-        jg.edge_attr = jg.edge_attr.long()
-        x = self.model(g1, g2, jg)
-        loss = self.model.compute_loss(self.args, x, jg)
-        # Log the run at every epoch, although this gets reduced via mean to a float
-        self.log("train_loss", loss, on_step=False, on_epoch=True, prog_bar=False, logger=True)
-        return loss
+        try:
+            g1, g2, jg = batch
+            jg.edge_attr = jg.edge_attr.long()
+            x = self.model(g1, g2, jg)
+            loss = self.model.compute_loss(self.args, x, jg)
+            # Log the run at every epoch, although this gets reduced via mean to a float
+            self.log("train_loss", loss, on_step=False, on_epoch=True, prog_bar=False, logger=True)
+            return loss
+        except Exception as e:
+            print(f"\n{'='*80}")
+            print(f"ERROR IN BATCH {batch_idx}")
+            print(f"g1: num_nodes={g1.num_nodes}, num_edges={g1.num_edges}")
+            print(f"g2: num_nodes={g2.num_nodes}, num_edges={g2.num_edges}")
+            print(f"jg: num_nodes={jg.num_nodes}, num_edges={jg.num_edges}")
+            print(f"g1.edge_index shape: {g1.edge_index.shape}, min: {g1.edge_index.min()}, max: {g1.edge_index.max()}")
+            print(f"g2.edge_index shape: {g2.edge_index.shape}, min: {g2.edge_index.min()}, max: {g2.edge_index.max()}")
+            print(f"jg.edge_index shape: {jg.edge_index.shape}, min: {jg.edge_index.min()}, max: {jg.edge_index.max()}")
+            if hasattr(g1, 'x') and g1.x is not None:
+                print(f"g1.x shape: {g1.x.shape}, dtype: {g1.x.dtype}")
+            if hasattr(g2, 'x') and g2.x is not None:
+                print(f"g2.x shape: {g2.x.shape}, dtype: {g2.x.dtype}")
+            print(f"Error type: {type(e).__name__}")
+            print(f"Error message: {e}")
+            print(f"{'='*80}\n")
+            raise
 
     def validation_step(self, batch, batch_idx):
         g1, g2, jg = batch
