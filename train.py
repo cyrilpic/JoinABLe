@@ -43,8 +43,9 @@ class JointPrediction(pl.LightningModule):
             pre_net=args.pre_net
         )
         # Compile model for H100 optimization (PyTorch 2.x)
-        if hasattr(torch, 'compile'):
-            self.model = torch.compile(self.model)
+        # NOTE: torch.compile() disabled due to incompatibility with model architecture
+        # if hasattr(torch, 'compile'):
+        #     self.model = torch.compile(self.model)
         self.save_hyperparameters()
         self.args = args
         self.test_iou = torchmetrics.classification.BinaryJaccardIndex(
