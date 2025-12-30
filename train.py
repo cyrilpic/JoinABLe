@@ -267,7 +267,7 @@ def get_trainer(args, loggers, callbacks=None, resume_checkpoint=None, mode="tra
                 logger=loggers,
                 max_epochs=args.epochs,
                 sync_batchnorm=args.batch_norm,
-                precision="bf16-mixed",
+                precision="32-true",
                 log_every_n_steps=log_every_n_steps,
             )
         # Single GPU training
@@ -278,7 +278,7 @@ def get_trainer(args, loggers, callbacks=None, resume_checkpoint=None, mode="tra
                 accelerator="gpu",
                 logger=loggers,
                 max_epochs=args.epochs,
-                precision="bf16-mixed",
+                precision="32-true",
                 log_every_n_steps=log_every_n_steps,
             )
         if resume_checkpoint is not None and trainer.global_rank == 0:
@@ -296,8 +296,10 @@ def get_trainer(args, loggers, callbacks=None, resume_checkpoint=None, mode="tra
 def train_once(args, exp_name_dir, loggers, train_dataset, val_dataset, resume_checkpoint=None):
     """Train once for multiple run training"""
     pl.seed_everything(args.seed)
-    # Enable anomaly detection to catch NaN/Inf in backward pass
-    torch.autograd.set_detect_anomaly(True)
+    # Set high precision for matrix multiplications for better numerical stability
+    torch.set_float32_matmul_precision('high')
+    # Disable anomaly detection - it can interfere with CUDA operations
+    # torch.autograd.set_detect_anomaly(True)
     model = JointPrediction(args)
     # Save in the main experiment directory
     checkpoint_callback = ModelCheckpoint(
